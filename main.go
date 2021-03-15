@@ -28,6 +28,7 @@ import (
 	"tinygo.org/x/go-llvm"
 
 	"go.bug.st/serial"
+	"go.bug.st/serial/enumerator"
 )
 
 var (
@@ -240,15 +241,12 @@ func Flash(pkgName, port string, options *compileopts.Options) error {
 	return builder.Build(pkgName, fileExt, config, func(result builder.BuildResult) error {
 		// do we need port reset to put MCU into bootloader mode?
 		if config.Target.PortReset == "true" && flashMethod != "openocd" {
-			if port == "" {
-				var err error
-				port, err = getDefaultPort()
-				if err != nil {
-					return err
-				}
+			port, err := getDefaultPort(port)
+			if err != nil {
+				return err
 			}
 
-			err := touchSerialPortAt1200bps(port)
+			err = touchSerialPortAt1200bps(port)
 			if err != nil {
 				return &commandError{"failed to reset port", result.Binary, err}
 			}
@@ -264,9 +262,9 @@ func Flash(pkgName, port string, options *compileopts.Options) error {
 			fileToken := "{" + fileExt[1:] + "}"
 			flashCmd = strings.ReplaceAll(flashCmd, fileToken, result.Binary)
 
-			if port == "" && strings.Contains(flashCmd, "{port}") {
+			if strings.Contains(flashCmd, "{port}") {
 				var err error
-				port, err = getDefaultPort()
+				port, err = getDefaultPort(port)
 				if err != nil {
 					return err
 				}
@@ -664,30 +662,47 @@ func windowsFindUSBDrive(volume string, options *compileopts.Options) (string, e
 }
 
 // getDefaultPort returns the default serial port depending on the operating system.
-func getDefaultPort() (port string, err error) {
+func getDefaultPort(portStr string) (port string, err error) {
 	var portPath string
 	switch runtime.GOOS {
-	case "darwin":
-		portPath = "/dev/cu.usb*"
-	case "linux":
-		portPath = "/dev/ttyACM*"
 	case "freebsd":
 		portPath = "/dev/cuaU*"
-	case "windows":
-		ports, err := serial.GetPortsList()
+	case "darwin", "linux", "windows":
+		ports, err := enumerator.GetDetailedPortsList()
 		if err != nil {
 			return "", err
 		}
 
-		if len(ports) == 0 {
-			return "", errors.New("no serial ports available")
-		} else if len(ports) > 1 {
-			return "", errors.New("multiple serial ports available - use -port flag")
+		portNames := []string{}
+		for _, p := range ports {
+			portNames = append(portNames, p.Name)
 		}
 
-		return ports[0], nil
+		if len(ports) == 0 {
+			return "", errors.New("no serial ports available")
+		} else if len(ports) == 1 {
+			return ports[0].Name, nil
+		}
+
+		for _, ps := range strings.Split(portStr, ",") {
+			for _, p := range ports {
+				if p.Name == ps {
+					return p.Name, nil
+				}
+			}
+		}
+
+		if portStr != "" {
+			return "", errors.New("port you specified '" + portStr + "' does not exist, available ports are " + strings.Join(portNames, ", "))
+		}
+
+		return "", errors.New("multiple ports exist, available ports are " + strings.Join(portNames, ", "))
 	default:
 		return "", errors.New("unable to search for a default USB device to be flashed on this OS")
+	}
+
+	if portStr != "" {
+		return portStr, nil
 	}
 
 	d, err := filepath.Glob(portPath)
