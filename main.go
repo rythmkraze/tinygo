@@ -241,7 +241,7 @@ func Flash(pkgName, port string, options *compileopts.Options) error {
 	return builder.Build(pkgName, fileExt, config, func(result builder.BuildResult) error {
 		// do we need port reset to put MCU into bootloader mode?
 		if config.Target.PortReset == "true" && flashMethod != "openocd" {
-			port, err := getDefaultPort(port)
+			port, err := getDefaultPort(strings.FieldsFunc(port, func(c rune) bool { return c == ',' }))
 			if err != nil {
 				return err
 			}
@@ -264,7 +264,7 @@ func Flash(pkgName, port string, options *compileopts.Options) error {
 
 			if strings.Contains(flashCmd, "{port}") {
 				var err error
-				port, err = getDefaultPort(port)
+				port, err = getDefaultPort(strings.FieldsFunc(port, func(c rune) bool { return c == ',' }))
 				if err != nil {
 					return err
 				}
@@ -662,58 +662,66 @@ func windowsFindUSBDrive(volume string, options *compileopts.Options) (string, e
 }
 
 // getDefaultPort returns the default serial port depending on the operating system.
-func getDefaultPort(portStr string) (port string, err error) {
-	var portPath string
+func getDefaultPort(portCandidates []string) (port string, err error) {
+	if len(portCandidates) == 1 {
+		return portCandidates[0], nil
+	}
+
+	var ports []string
 	switch runtime.GOOS {
 	case "freebsd":
-		portPath = "/dev/cuaU*"
+		ports, err = filepath.Glob("/dev/cuaU*")
 	case "darwin", "linux", "windows":
-		ports, err := enumerator.GetDetailedPortsList()
+		var portsList []*enumerator.PortDetails
+		portsList, err = enumerator.GetDetailedPortsList()
 		if err != nil {
 			return "", err
 		}
 
-		portNames := []string{}
-		for _, p := range ports {
-			portNames = append(portNames, p.Name)
+		for _, p := range portsList {
+			ports = append(ports, p.Name)
 		}
 
-		if len(ports) == 0 {
-			return "", errors.New("no serial ports available")
-		} else if len(ports) == 1 {
-			return ports[0].Name, nil
-		}
-
-		for _, ps := range strings.Split(portStr, ",") {
-			for _, p := range ports {
-				if p.Name == ps {
-					return p.Name, nil
-				}
+		if ports == nil || len(ports) == 0 {
+			// fallback
+			switch runtime.GOOS {
+			case "darwin":
+				ports, err = filepath.Glob("/dev/cu.usb*")
+			case "linux":
+				ports, err = filepath.Glob("/dev/ttyACM*")
+			case "windows":
+				ports, err = serial.GetPortsList()
 			}
 		}
-
-		if portStr != "" {
-			return "", errors.New("port you specified '" + portStr + "' does not exist, available ports are " + strings.Join(portNames, ", "))
-		}
-
-		return "", errors.New("multiple ports exist, available ports are " + strings.Join(portNames, ", "))
 	default:
 		return "", errors.New("unable to search for a default USB device to be flashed on this OS")
 	}
 
-	if portStr != "" {
-		return portStr, nil
-	}
-
-	d, err := filepath.Glob(portPath)
 	if err != nil {
 		return "", err
-	}
-	if d == nil {
+	} else if ports == nil {
 		return "", errors.New("unable to locate a serial port")
+	} else if len(ports) == 0 {
+		return "", errors.New("no serial ports available")
 	}
 
-	return d[0], nil
+	if len(portCandidates) == 0 {
+		if len(ports) == 1 {
+			return ports[0], nil
+		} else {
+			return "", errors.New("multiple ports exist, available ports are " + strings.Join(ports, ", "))
+		}
+	}
+
+	for _, ps := range portCandidates {
+		for _, p := range ports {
+			if p == ps {
+				return p, nil
+			}
+		}
+	}
+
+	return "", errors.New("port you specified '" + strings.Join(portCandidates, ",") + "' does not exist, available ports are " + strings.Join(ports, ", "))
 }
 
 func usage() {
@@ -848,7 +856,7 @@ func main() {
 	printCommands := flag.Bool("x", false, "Print commands")
 	nodebug := flag.Bool("no-debug", false, "disable DWARF debug symbol generation")
 	ocdOutput := flag.Bool("ocd-output", false, "print OCD daemon output during debug")
-	port := flag.String("port", "", "flash port")
+	port := flag.String("port", "", "flash port (can specify multiple candidates separated by commas)")
 	programmer := flag.String("programmer", "", "which hardware programmer to use")
 	cFlags := flag.String("cflags", "", "additional cflags for compiler")
 	ldFlags := flag.String("ldflags", "", "additional ldflags for linker")
