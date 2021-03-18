@@ -709,7 +709,7 @@ func getDefaultPort(portCandidates []string) (port string, err error) {
 		if len(ports) == 1 {
 			return ports[0], nil
 		} else {
-			return "", errors.New("multiple ports exist, available ports are " + strings.Join(ports, ", "))
+			return "", errors.New("multiple serial ports available - use -port flag, available ports are " + strings.Join(ports, ", "))
 		}
 	}
 
