@@ -196,6 +196,12 @@ func LowerFuncValues(mod llvm.Module) {
 			}
 			getFuncPtrCall.EraseFromParentAsInstruction()
 		}
+
+		// Clean up all globals used before func lowering.
+		for _, obj := range info.funcValueWithSignatures {
+			obj.EraseFromParentAsGlobal()
+		}
+		info.sig.EraseFromParentAsGlobal()
 	}
 }
 
