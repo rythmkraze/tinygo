@@ -836,8 +836,6 @@ func main() {
 	ocdOutput := flag.Bool("ocd-output", false, "print OCD daemon output during debug")
 	port := flag.String("port", "", "flash port")
 	programmer := flag.String("programmer", "", "which hardware programmer to use")
-	cFlags := flag.String("cflags", "", "additional cflags for compiler")
-	ldFlags := flag.String("ldflags", "", "additional ldflags for linker")
 	wasmAbi := flag.String("wasm-abi", "", "WebAssembly ABI conventions: js (no i64 params) or generic")
 
 	var flagJSON, flagDeps *bool
@@ -883,14 +881,6 @@ func main() {
 		Tags:          *tags,
 		WasmAbi:       *wasmAbi,
 		Programmer:    *programmer,
-	}
-
-	if *cFlags != "" {
-		options.CFlags = strings.Split(*cFlags, " ")
-	}
-
-	if *ldFlags != "" {
-		options.LDFlags = strings.Split(*ldFlags, " ")
 	}
 
 	os.Setenv("CC", "clang -target="+*target)
